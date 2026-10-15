@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Ogdobir - Retro Synthwave Visualizer</title>
+  <script src="lib/p5.min.js"></script>
+  <script src="lib/p5.sound.min.js"></script>
+  <script>
+    window.onload = () => {
+      if (typeof p5 !== 'undefined') {
+        p5.disableFriendlyErrors = true;
+      }
+    };
+  </script>
+  <style>
+    html, body { margin: 0; padding: 0; overflow: hidden; background: #000; }
+    canvas { display: block; image-rendering: pixelated; }
+    #ui {
+      position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+      text-align: center; font-family: 'Courier New', Courier, monospace;
+      color: #ff00ff; z-index: 10; cursor: pointer;
+      border: 4px solid #ff00ff; padding: 20px; background: rgba(0,0,0,0.8);
+      box-shadow: 0 0 20px #ff00ff;
+    }
+    #ui h1 { margin: 0 0 10px 0; text-transform: uppercase; letter-spacing: 5px; }
+    #ui p { margin: 0; font-size: 14px; color: #00ffff; }
+  </style>
+</head>
+<body>
+  <div id="ui" onclick="startAudio()">
+    <h1>Ogdobir</h1>
+    <p>CLICK TO START ENGINE</p>
+  </div>
+<script>
+class RetroCar {
+  constructor(laneX) {
+    this.laneX = laneX;
+    this.reset();
+    this.z = random(100, 1000);
+  }
+
+  reset() {
+    this.z = 15000;
+    this.speed = random(10, 20);
+  }
+
+  update(amp) {
+    const safeAmp = isNaN(amp) ? 0 : amp;
+    let accelerationFactor = map(this.z, 15000, 250, 1, 10);
+    let speedBoost = safeAmp * 50 * accelerationFactor;
+    this.z -= (this.speed * accelerationFactor + speedBoost);
+
+    if (isNaN(this.z) || this.z < 250) {
+      this.reset();
+    }
+  }
+
+  display(bass) {
+    if (isNaN(this.z)) return;
+
+    let scale = 300 / this.z;
+    let x = width / 2 + this.laneX * scale;
+    let horizonY = height * CONFIG.horizonY;
+    
+    let zMax = 15000;
+    let zMin = 250;
+    let K = (height - horizonY) / (1/zMin - 1/zMax);
+    let y = horizonY + K * (1/this.z - 1/zMax);
+    
+    let w = 400 * scale;
+    let h = 150 * scale;
+    
+    push();
+    translate(x, y);
+    rectMode(CENTER);
+    
+    fill(255);
+    noStroke();
+    rect(0, 0, w, h); 
+    rect(0, -h * 0.3, w * 0.6, h * 0.6); 
+    
+    fill(0, 150);
+    rect(0, -h * 0.3, w * 0.5, h * 0.4); 
+    
+    fill(255, 0, 0, map(bass, 0, 255, 100, 255));
+    rect(-w * 0.4, 0, w * 0.2, h * 0.3); 
+    rect(w * 0.4, 0, w * 0.2, h * 0.3); 
+    pop();
+  }
+}
+
+const CONFIG = {
+  audioPath: 'Ogdobir.wav', 
+  gridColor: '#ff00ff',
+  sunColor: '#ffaa00',
+  carColors: ['#00ffff', '#ff00ff', '#ffff00', '#00ff00'],
+  horizonY: 0.6,
+};
+
+let song, fft;
+let started = false;
+let offset = 0;
+let cars = [];
+
+function setup() {
+  createCanvas(windowWidth, windowHeight);
+  pixelDensity(1);
+  
+  song = loadSound(CONFIG.audioPath, 
+    () => console.log("Audio loaded successfully"),
+    (err) => console.error("Audio load failed:", err)
+  );
+  
+  fft = new p5.FFT();
+
+  const lanes = [-400, -150, 150, 400]; 
+  lanes.forEach(laneX => {
+    cars.push(new RetroCar(laneX));
+  });
+}
+
+function draw() {
+  background(10, 0, 20);
+
+  if (!started) return;
+
+  fft.analyze();
+  let bass = fft.getEnergy("bass");
+  let mid = fft.getEnergy("mid");
+  let treble = fft.getEnergy("treble");
+  let amp = song.getLevel();
+  
+  let shake = map(bass, 200, 255, 0, 10);
+  
+  push();
+  translate(random(-shake, shake), random(-shake, shake));
+
+  drawBackground(treble);
+  drawSun(mid);
+  drawGrid(bass);
+  
+  for (let i = 0; i < cars.length; i++) {
+    cars[i].update(amp);
+    cars[i].display(bass);
+  }
+
+  drawOverlay(bass);
+  pop();
+}
+
+function drawBackground(treble) {
+  stroke(255);
+  for (let i = 0; i < 50; i++) {
+    let x = (noise(i, frameCount * 0.0015) * width);
+    let y = (noise(i + 10, frameCount * 0.0015) * height * CONFIG.horizonY);
+    let size = random(1, 3) * map(treble, 0, 255, 0.5, 2);
+    strokeWeight(size);
+    point(x, y);
+  }
+}
+
+function drawSun(mid) {
+  let sunX = width / 2;
+  let sunY = height * CONFIG.horizonY;
+  let sunRadius = map(mid, 0, 255, 150, 200);
+  noStroke();
+  for (let r = sunRadius * 1.5; r > 0; r -= 10) {
+    fill(255, 100, 0, map(r, 0, sunRadius * 1.5, 150, 0));
+    ellipse(sunX, sunY, r * 2, r * 2);
+  }
+  fill(255, 200, 0);
+  arc(sunX, sunY, sunRadius * 2, sunRadius * 2, PI, TWO_PI);
+}
+
+function drawGrid(bass) {
+  stroke(CONFIG.gridColor);
+  strokeWeight(2);
+  let horizonY = height * CONFIG.horizonY;
+  let speed = map(bass, 0, 255, 2, 10);
+  offset += speed;
+  if (offset > 40) offset = 0;
+
+  for (let i = 0; i < 20; i++) {
+    let y = map(i, 0, 20, horizonY, height);
+    let opacity = map(i, 0, 20, 50, 255);
+    stroke(255, 0, 255, opacity);
+    line(0, y, width, y);
+  }
+  for (let i = -10; i <= 10; i++) {
+    let xStart = width / 2 + i * (width / 5);
+    line(width / 2, horizonY, xStart, height);
+  }
+  for (let i = 0; i < 10; i++) {
+    let z = (i * 40 + offset) % 400;
+    let y = map(z, 0, 400, horizonY, height);
+    let w = map(z, 0, 400, 0, width * 2);
+    stroke(255, 0, 255, map(z, 0, 400, 0, 255));
+    line(width / 2 - w / 2, y, width / 2 + w / 2, y);
+  }
+}
+
+function drawOverlay(bass) {
+  stroke(0, 50);
+  strokeWeight(1);
+  for (let i = 0; i < height; i += 4) {
+    line(0, i, width, i);
+  }
+  
+  noFill();
+  strokeWeight(100);
+  stroke(0, 100);
+  // Removed suspicious rect call that caused the L-shape artifact
+
+  fill(0);
+  noStroke();
+  rectMode(CORNER);
+  let frameSize = 180; 
+  let sideFrameSize = 450;
+  rect(0, 0, width, frameSize);
+  rect(0, height - frameSize, width, frameSize);
+  rect(0, 0, sideFrameSize, height);
+  rect(width - sideFrameSize, 0, sideFrameSize, height);
+}
+
+function startAudio() {
+  document.getElementById('ui').style.display = 'none';
+  if (song && song.isLoaded()) {
+    song.play();
+    started = true;
+  } else {
+    console.error("Audio not yet loaded");
+  }
+}
+
+function windowResized() {
+  resizeCanvas(windowWidth, windowHeight);
+}
+</script>
+</body>
+</html>
